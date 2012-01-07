@@ -1,0 +1,11 @@
+=============================================
+Python binding of OSMesa (Patch for PyOpenGL)
+=============================================
+
+License: MIT
+Copyright (c) 2012 Xu, Yuan <xuyuan.cn@gmail.com>
+
+Demo
+====
+
+    * osdemo.py

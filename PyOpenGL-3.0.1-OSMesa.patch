@@ -1,0 +1,247 @@
+diff -Nur PyOpenGL-3.0.1/OpenGL/__init__.py PyOpenGL-3.0.1-OSMesa//OpenGL/__init__.py
+--- PyOpenGL-3.0.1/OpenGL/__init__.py	2009-12-11 17:32:39.000000000 +0100
++++ PyOpenGL-3.0.1-OSMesa//OpenGL/__init__.py	2012-01-07 09:54:56.308351725 +0100
+@@ -186,6 +186,7 @@
+ PlatformPlugin( 'linux2', 'OpenGL.platform.glx.GLXPlatform' )
+ PlatformPlugin( 'darwin', 'OpenGL.platform.darwin.DarwinPlatform' )
+ PlatformPlugin( 'posix', 'OpenGL.platform.glx.GLXPlatform' )
++PlatformPlugin( 'osmesa', 'OpenGL.platform.osmesa.OSMesaPlatform')
+ 
+ FormatHandler( 'none', 'OpenGL.arrays.nones.NoneHandler' )
+ FormatHandler( 'str', 'OpenGL.arrays.strings.StringHandler' )
+diff -Nur PyOpenGL-3.0.1/OpenGL/platform/__init__.py PyOpenGL-3.0.1-OSMesa//OpenGL/platform/__init__.py
+--- PyOpenGL-3.0.1/OpenGL/platform/__init__.py	2009-08-30 04:26:10.000000000 +0200
++++ PyOpenGL-3.0.1-OSMesa//OpenGL/platform/__init__.py	2012-01-07 09:54:47.464307877 +0100
+@@ -22,7 +22,8 @@
+ def _load( ):
+     """Load the os.name plugin for the platform functionality"""
+     
+-    key = (sys.platform,os.name)
++    #key = (sys.platform,os.name)
++    key = ('osmesa',)
+     plugin  = PlatformPlugin.match( key )
+     plugin_class = plugin.load()
+     plugin.loaded = True
+diff -Nur PyOpenGL-3.0.1/OpenGL/platform/osmesa.py PyOpenGL-3.0.1-OSMesa//OpenGL/platform/osmesa.py
+--- PyOpenGL-3.0.1/OpenGL/platform/osmesa.py	1970-01-01 01:00:00.000000000 +0100
++++ PyOpenGL-3.0.1-OSMesa//OpenGL/platform/osmesa.py	2012-01-07 09:54:27.344208107 +0100
+@@ -0,0 +1,100 @@
++"""OSMesa-specific features"""
++import ctypes, ctypes.util
++from OpenGL.platform import baseplatform, ctypesloader
++
++assert hasattr( ctypes, 'RTLD_GLOBAL' ), """Old ctypes without ability to load .so for global resolution: Get ctypes CVS branch_1_0, not CVS HEAD or released versions!"""
++
++
++class OSMesaPlatform( baseplatform.BasePlatform ):
++    """OSMesa implementation for PyOpenGL"""
++    try:
++        GL = OpenGL = ctypesloader.loadLibrary(
++            ctypes.cdll,
++            'OSMesa', 
++            mode=ctypes.RTLD_GLOBAL 
++        )
++    except OSError, err:
++        raise ImportError("Unable to load OpenGL library", *err.args)
++    try:
++        GLU = ctypesloader.loadLibrary(
++            ctypes.cdll,
++            'GLU',
++            mode=ctypes.RTLD_GLOBAL 
++        )
++    except OSError, err:
++        GLU = None
++    # glut shouldn't need to be global, but just in case a dependent library makes
++    # the same assumption GLUT does...
++    try:
++        GLUT = ctypesloader.loadLibrary(
++            ctypes.cdll,
++            'glut', 
++            mode=ctypes.RTLD_GLOBAL 
++        )
++    except OSError, err:
++        GLUT = None
++
++    try:
++        GLE = ctypesloader.loadLibrary(
++            ctypes.cdll,
++            'gle', 
++            mode=ctypes.RTLD_GLOBAL 
++        )
++    except OSError, err:
++        GLE = None
++
++    DEFAULT_FUNCTION_TYPE = staticmethod( ctypes.CFUNCTYPE )
++
++    #    glXGetProcAddressARB = GL.glXGetProcAddressARB
++    #glXGetProcAddressARB.restype = ctypes.c_void_p
++    #getExtensionProcedure = staticmethod( glXGetProcAddressARB )
++
++    baseplatform.BasePlatform.EXPORTED_NAMES += ['OSMesaCreateContext',
++        'OSMesaMakeCurrent', 'OSMesaGetCurrentContext', 'OSMesaDestroyContext']
++
++    # export OSMesa functions from osmesa.h
++    class struct_osmesa_context(ctypes.Structure):
++        __slots__ = [
++        ]
++    struct_osmesa_context._fields_ = [
++        ('_opaque_struct', ctypes.c_int)
++    ]
++    OSMesaContext = ctypes.POINTER(struct_osmesa_context)
++
++    GLenum = ctypes.c_uint
++    GLboolean = ctypes.c_ubyte
++    GLsizei = ctypes.c_int
++
++    OSMesaCreateContext = GL.OSMesaCreateContext
++    OSMesaCreateContext.argtypes = [GLenum, OSMesaContext]
++    OSMesaCreateContext.restype = OSMesaContext
++
++    OSMesaDestroyContext = GL.OSMesaDestroyContext
++    OSMesaDestroyContext.argtypes = [OSMesaContext]
++
++    OSMesaMakeCurrent = GL.OSMesaMakeCurrent
++    OSMesaMakeCurrent.argtypes = [OSMesaContext, ctypes.POINTER(None),
++                                GLenum, GLsizei, GLsizei]
++    OSMesaMakeCurrent.restype = GLboolean
++
++    OSMesaGetCurrentContext = GL.OSMesaGetCurrentContext
++    #OSMesaGetCurrentContext.restype = OSMesaContext
++    GetCurrentContext = CurrentContextIsValid = OSMesaGetCurrentContext
++
++    def getGLUTFontPointer( self, constant ):
++        """Platform specific function to retrieve a GLUT font pointer
++        
++        GLUTAPI void *glutBitmap9By15;
++        #define GLUT_BITMAP_9_BY_15		(&glutBitmap9By15)
++        
++        Key here is that we want the addressof the pointer in the DLL,
++        not the pointer in the DLL.  That is, our pointer is to the 
++        pointer defined in the DLL, we don't want the *value* stored in
++        that pointer.
++        """
++        name = [ x.title() for x in constant.split( '_' )[1:] ]
++        internal = 'glut' + "".join( [x.title() for x in name] )
++        pointer = ctypes.c_void_p.in_dll( self.GLUT, internal )
++        return ctypes.c_void_p(ctypes.addressof(pointer))
++    
++    safeGetError = staticmethod( OpenGL.glGetError )
+diff -Nur PyOpenGL-3.0.1/osdemo.py PyOpenGL-3.0.1-OSMesa//osdemo.py
+--- PyOpenGL-3.0.1/osdemo.py	1970-01-01 01:00:00.000000000 +0100
++++ PyOpenGL-3.0.1-OSMesa//osdemo.py	2012-01-07 09:55:15.644447608 +0100
+@@ -0,0 +1,114 @@
++from math import pi, sin, cos
++from OpenGL.GL import *
++
++
++def torus(innerRadius, outerRadius, sides, rings):
++    ringDelta = 2.0 * pi / rings
++    sideDelta = 2.0 * pi / sides
++
++    theta = 0.0
++    cosTheta = 1.0
++    sinTheta = 0.0
++    for i in range(rings - 1, -1, -1):
++        theta1 = theta + ringDelta
++        cosTheta1 = cos(theta1)
++        sinTheta1 = sin(theta1)
++        glBegin(GL_QUAD_STRIP)
++        phi = 0.0
++        for j in range(sides, -1, -1):
++            phi += sideDelta
++            cosPhi = cos(phi)
++            sinPhi = sin(phi)
++            dist = outerRadius + innerRadius * cosPhi
++
++            glNormal3f(cosTheta1 * cosPhi, -sinTheta1 * cosPhi, sinPhi)
++            glVertex3f(cosTheta1 * dist, -sinTheta1 * dist, innerRadius * sinPhi)
++            glNormal3f(cosTheta * cosPhi, -sinTheta * cosPhi, sinPhi)
++            glVertex3f(cosTheta * dist, -sinTheta * dist,  innerRadius * sinPhi)
++        glEnd()
++        theta = theta1
++        cosTheta = cosTheta1
++        sinTheta = sinTheta1
++
++
++def render_image():
++    light_ambient = [0.0, 0.0, 0.0, 1.0]
++    light_diffuse = [1.0, 1.0, 1.0, 1.0]
++    light_specular = [1.0, 1.0, 1.0, 1.0]
++    light_position = [1.0, 1.0, 1.0, 0.0]
++    red_mat   = [1.0, 0.2, 0.2, 1.0]
++    green_mat = [0.2, 1.0, 0.2, 1.0]
++    blue_mat  = [0.2, 0.2, 1.0, 1.0]
++
++    glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient)
++    glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse)
++    glLightfv(GL_LIGHT0, GL_SPECULAR, light_specular)
++    glLightfv(GL_LIGHT0, GL_POSITION, light_position)
++
++    glEnable(GL_LIGHTING)
++    glEnable(GL_LIGHT0)
++    glEnable(GL_DEPTH_TEST)
++
++    glMatrixMode(GL_PROJECTION)
++    glLoadIdentity()
++    glOrtho(-2.5, 2.5, -2.5, 2.5, -10.0, 10.0)
++    glMatrixMode(GL_MODELVIEW)
++
++    glClear( GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT )
++
++    glPushMatrix()
++    glRotatef(20.0, 1.0, 0.0, 0.0)
++
++    glPushMatrix()
++    glTranslatef(-0.75, 0.5, 0.0)
++    glRotatef(90.0, 1.0, 0.0, 0.0)
++    glMaterialfv(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE, red_mat)
++    torus(0.275, 0.85, 20, 20)
++    glPopMatrix()
++
++    glPopMatrix()
++
++    # This is very important!!!
++    # Make sure buffered commands are finished!!!
++    glFinish()
++
++
++def write_ppm(buf, filename):
++    f = open(filename, "w")
++    if f:
++        h, w, c = buf.shape
++        print >>f, "P3"
++        print >>f, "# ascii ppm file created by osmesa"
++        print >>f, "%i %i" % (w, h)
++        print >>f, "255"
++        for y in range(h - 1, -1, -1):
++            for x in range(w):
++                pixel = buf[y, x]
++                l = " %3d %3d %3d" % (pixel[0], pixel[1], pixel[2])
++                f.write(l)
++            f.write("\n")
++
++if __name__ == '__main__':
++    from OpenGL import arrays
++    from OpenGL.platform import (CurrentContextIsValid, OSMesaCreateContext,
++        OSMesaMakeCurrent, OSMesaDestroyContext)
++
++    ctx = OSMesaCreateContext(GL_RGBA, None)
++
++    width, height = 600, 400
++    buf = arrays.GLubyteArray.zeros((height, width, 4))
++    p = arrays.ArrayDatatype.dataPointer(buf)
++    assert(OSMesaMakeCurrent(ctx, p, GL_UNSIGNED_BYTE, width, height))
++
++    assert(CurrentContextIsValid())
++
++    z = glGetIntegerv(GL_DEPTH_BITS)
++    s = glGetIntegerv(GL_STENCIL_BITS)
++    a = glGetIntegerv(GL_ACCUM_RED_BITS)
++    print "Depth=%d Stencil=%d Accum=%d" % (z, s, a)
++
++    render_image()
++
++    write_ppm(buf, 'output.ppm')
++
++    OSMesaDestroyContext(ctx)
+\ No newline at end of file
