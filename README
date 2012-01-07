@@ -5,6 +5,12 @@ Python binding of OSMesa (Patch for PyOpenGL)
 License: MIT
 Copyright (c) 2012 Xu, Yuan <xuyuan.cn@gmail.com>
 
+Install
+=======
+    1. download PyOpenGL
+    2. apply patch: `patch -p0 PyOpenGL-3.0.1 < PyOpenGL-3.0.1-OSMesa.patch`
+    3. build (install) PyOpenGL
+
 Demo
 ====
 
